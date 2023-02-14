@@ -1,0 +1,563 @@
+<template>
+  <div>
+    <v-breadcrumbs class="elevation-1 my-4" :items="breadcrumbs" />
+
+    <v-card>
+      <v-card-title>
+        <v-row>
+          <v-col> Processos </v-col>
+          <v-col v-if="$store.state.user.customer_id == 1" cols="auto">
+            <v-btn
+              color="primary"
+              small
+              target="_blank"
+              href="api/processes"
+            >
+              Chamar Api
+            </v-btn>
+          </v-col>
+        </v-row>
+      </v-card-title>
+
+      <v-card-text>
+        <v-row>
+          <v-col v-if="$store.state.user.customer_id == 1">
+            <v-autocomplete
+              v-model="filters.customer"
+              label="Empresa"
+              :items="customers"
+              item-text="name"
+              item-value="id"
+              filled
+              dense
+              clearable
+              multiple
+            ></v-autocomplete>
+          </v-col>
+          <v-col>
+            <v-autocomplete
+              v-model="filters.project"
+              label="Aplicação"
+              :items="projects"
+              item-text="name"
+              item-value="id"
+              filled
+              dense
+              clearable
+              multiple
+            ></v-autocomplete>
+          </v-col>
+          <v-col>
+            <v-autocomplete
+              v-model="filters.user"
+              label="Usuário"
+              :items="users"
+              item-text="name"
+              item-value="id"
+              filled
+              dense
+              clearable
+              multiple
+            ></v-autocomplete>
+          </v-col>
+          <v-col>
+            <v-autocomplete
+              v-model="filters.status"
+              label="Status"
+              :items="processStatus"
+              item-text="name"
+              item-value="id"
+              filled
+              dense
+              clearable
+              multiple
+            ></v-autocomplete>
+          </v-col>
+          <v-col cols="auto">
+            <v-btn color="default" x-large @click="fetchProcesses">
+              <v-icon left small>mdi-filter</v-icon>
+              Pesquisar
+            </v-btn>
+          </v-col>
+        </v-row>
+
+        <v-data-table
+          :headers="headers"
+          :items="ProcessesList"
+          :options.sync="options"
+          :items-per-page="perPage"
+          :server-items-length="totalRecords"
+          :loading="loading"
+          :footer-props="{'items-per-page-options': [10, 30, 60, 120]}"
+          multi-sort
+          class="row-pointer elevation-2"
+          @click:row="rowClick"
+        >
+          <template v-slot:item.id="{ item }">
+            {{item.id}} <span v-if="item.status_id == 2"><v-icon :style='item.processIsRuning === "true" ? "color: green; font-size: 10px;" : "color: red; font-size: 10px;"'>mdi-circle</v-icon></span>
+          </template>
+          <template v-if="$store.state.user.customer_id == 1" v-slot:item.status="{ item }">
+            <v-chip v-if="item.status_id == 1 " color="success" @click="updateModal(item)" label small>
+              Concluído
+            </v-chip>
+            <v-chip v-if="item.status_id == 3 " color="warning" @click="updateModal(item)"  label small>
+              Em espera
+            </v-chip>
+            <v-chip v-if="item.status_id == 4 " color="error" @click="updateModal(item)"  label small>
+              Erro
+            </v-chip>
+            <v-chip v-if="item.status_id == 2 " color="accent" @click="updateModal(item)"  label small>
+              Processando
+            </v-chip>
+          </template>
+          <template v-else v-slot:item.status="{ item }">
+            <v-chip v-if="item.status_id == 1 " color="success" label small>
+              Concluído
+            </v-chip>
+            <v-chip v-if="item.status_id == 3 " color="warning" label small>
+              Em espera
+            </v-chip>
+            <v-chip v-if="item.status_id == 4 " color="error" label small>
+              Erro
+            </v-chip>
+            <v-chip v-if="item.status_id == 2 " color="accent" label small>
+              Processando
+            </v-chip>
+          </template>
+          <template v-slot:item.logs="{ item }">
+            <v-col cols="auto" v-if="[1, 4].includes(item.status_id) && item.project.project_type_id == 1">
+              <v-tooltip bottom>
+                <template v-slot:activator="{ on, attrs }">
+                  <v-dialog max-width="600">
+                    <template v-slot:activator="props">
+                      <v-btn icon v-bind="props.attrs" v-on="props.on">
+                        <v-icon aria-hidden="false" v-bind="attrs" v-on="on">
+                          mdi-eye
+                        </v-icon>
+                      </v-btn>
+                    </template>
+                    <template v-slot:default="dialog">
+                      <v-card>
+                        <v-toolbar color="primary" dark
+                          >Mensagem</v-toolbar
+                        >
+                        <br />
+                        <v-card-text>
+                          <v-textarea
+                            label="Mensagem"
+                            outlined
+                            readonly
+                            :value="item.error_message || 'Sem mensagem'"
+                            required
+                          ></v-textarea>
+                        </v-card-text>
+                        <v-card-actions class="justify-end">
+                          <v-btn color="primary" @click="dialog.value = false"
+                            >Ok</v-btn
+                          >
+                        </v-card-actions>
+                      </v-card>
+                    </template>
+                  </v-dialog>
+                </template>
+                <span>{{item.error_message || 'Sem mensagem'}}</span>
+              </v-tooltip>
+            </v-col>
+            <v-col cols="auto" v-if="item.project.project_type_id == 2">
+              <v-tooltip bottom>
+                <template v-slot:activator="{ on, attrs }">
+                  <v-btn icon @click="openLog(item)" v-bind="attrs" v-on="on">
+                    <v-icon aria-hidden="false">mdi-eye</v-icon>
+                  </v-btn>
+                </template>
+                <span>Logs</span>
+              </v-tooltip>
+            </v-col>
+          </template>
+          <template v-slot:item.actions="{ item }">
+            <v-row justify="end" style="flex-wrap: nowrap">
+              <v-col cols="auto" class="pa-1" v-if="item.status_id == 1">
+                <v-btn
+                  color="success"
+                  elevation="2"
+                  small
+                  :href="'/api/processes/download/' + item.id"
+                  target="_blank"
+                ><v-icon left>mdi-cloud-download-outline</v-icon>Download</v-btn>
+              </v-col>
+              <v-col cols="auto" class="pa-1"  v-if="$store.state.user.customer_id == 1">
+                <v-btn
+                  color="primary"
+                  small
+                  target="_blank"
+                  :href="'api/processes/get/' + item.id"
+                >
+                  Chamar Api
+                </v-btn>
+
+              </v-col>
+              <v-col cols="auto" class="pa-1">
+                <v-btn
+                  color="info"
+                  small
+                  :to="{ name: 'chamado-edit', params: { id: 0, item: item } }"
+                >
+                  <v-icon class="mr-1" small>mdi-help-circle-outline</v-icon> Chamado
+                </v-btn>
+              </v-col>
+            </v-row>
+          </template>
+          <!---->
+          <template v-slot:item.delete="{ item }" v-if="$store.state.user.customer_id == 1">
+            <v-dialog max-width="600">
+              <template v-slot:activator="{ on, attrs }">
+                <v-btn v-bind="attrs" v-on="on" color="error" label x-small>
+                  Excluir
+                </v-btn>
+              </template>
+              <template v-slot:default="dialog">
+                <v-card>
+                  <v-toolbar color="primary" dark>Alerta!!</v-toolbar>
+                  <br />
+                  <v-card-text>
+                    <h4>Tem certeza que quer excluir o processo de id: {{item.id}} ?</h4>
+                  </v-card-text>
+                  <v-card-actions class="justify-end">
+                    <v-btn color="primary" @click="dialog.value = false">
+                      Voltar
+                    </v-btn>
+                    <v-btn @click="deleteProcess(item)" color="error">
+                      Excluir
+                    </v-btn>
+                  </v-card-actions>
+                </v-card>
+              </template>
+            </v-dialog>
+          </template>
+          <!---->
+        </v-data-table>
+      </v-card-text>
+      <v-dialog transition="dialog-top-transition" v-model="logModal" max-width="800">
+        <v-card>
+          <v-toolbar color="primary" dark>
+            <v-card-text class="d-flex justify-space-between">
+              <div>
+                ID: <b> {{proccess.id}}</b>
+              </div>
+              <div>
+                Projeto: <b> {{ proccess.project ? proccess.project.name : ""}}</b>
+              </div>
+              <div>
+                Status: <b> {{proccess.status ? proccess.status.name : ""}}</b>
+              </div>
+            </v-card-text>
+          </v-toolbar>
+          <v-card-text class="mt-3">
+            <v-data-table
+              :headers="headers2"
+              :items="log"
+              class="elevation-2"
+              :options.sync="options2"
+              :items-per-page="perPage2"
+              :server-items-length="totalRecords2"
+              :loading="loading"
+            >     
+              <template v-slot:item.created_at="{ item }">
+                {{toBrDateTime(item.created_at)}}
+              </template>  
+            </v-data-table>                                                  
+          </v-card-text>
+          <v-card-actions class="justify-end">
+            <v-btn @click="logModal = false">Voltar</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+      <update-status-modal ref="update_status" :proccess="proccess" v-on:updateStatus="updateStatus"></update-status-modal>
+      <new-process-modal ref="execute" :proccess="proccess" :project="project"/> 
+    </v-card>
+  </div>
+</template>
+
+<script>
+import { apiService } from "@/services/ApiService";
+import ResetPasswordModal from "./ResetPasswordModal";
+import UpdateStatusModal from './UpdateStatusModal.vue';
+import NewProcessModal from "../painelRPA/NewProcessModal";
+export default {
+  components: {UpdateStatusModal, NewProcessModal},
+  data() {
+    return {
+      logModal: false,
+      log: [],
+      breadcrumbs:
+     [
+        // {
+        //   text: "Dashboard",
+        //   disabled: true,
+        // },
+        {
+          text: "Projetos",
+          disabled: true,
+        },
+      ],
+      headers: [
+        {
+          text: "ID Processo",
+          value: "id",
+        },
+        {
+          text: "Aplicação",
+          value: "project.name",
+        },
+        {
+          text: "Iniciado em",
+          value: "start_at",
+        },
+        {
+          text: "Email",
+          value: "user.email",
+        },
+        {
+          text: "Empresa",
+          value: "user.customer",
+        },
+        {
+          text: "Status",
+          value: "status",
+        },
+        {
+          text: "Logs",
+          value: "logs",
+          filterable: false,
+          sortable: false,
+        },
+        {
+          text: "Resultado",
+          value: "actions",
+          align: "center",
+          filterable: false,
+          sortable: false,
+        },
+        {
+          text: "Ações",
+          value: "delete",
+          filterable: false,
+          sortable: false,
+        }
+      ],
+      headers2: [
+        {
+          text: "Data/Hora",
+          value: "created_at",
+          width: "200px"
+        },
+        {
+          text: "Mensagem",
+          value: "description",
+        },
+      ],
+      intervalProcess: null,
+      options: {
+        sortBy: ["name"],
+        sortDesc: [false],
+      },
+      options2: {
+        sortBy: ["name"],
+        sortDesc: [false],
+      },
+      proccess: {},
+      filters: {},
+      totalRecords: 0,
+      totalRecords2: 0,
+      perPage: 120,
+      perPage2: 10,
+      processes: [],
+      projects: [],
+      users: [],
+      processStatus: [],
+      customers: [],
+      loading: false
+    };
+  },
+  watch: {
+    options: {
+      handler() {
+        this.fetchProcesses();
+      },
+      deep: true,
+    },
+    options2: {
+      handler() {
+        this.fetchLog(this.proccess);
+      },
+      deep: true,
+    },
+  },
+  methods: {
+    downloadFile: function (process_id) {
+      this.loadingDownload = true;
+      let parms = { process_id };
+      apiService
+        .get("processes/download/"+process_id)
+        .then((response) => {
+          this.$snotify.success("Iniciando Download...");
+          //this.$emit("saved");
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {
+         this.loadingDownload = false;
+        });
+    },
+    updateModal: function(item){
+      this.proccess = item;
+      this.$refs.update_status.show();
+    },
+    updateStatus: async function(){
+      this.loading = true;
+      await this.fetchProcesses();
+    },
+    fetchProcesses: function () {
+      this.loading = true;
+      //this.processes = [];
+      //let parms = { ...this.options };
+      //parms["search"] = this.search;
+      apiService
+        .get("processes/"+this.$store.state.user.id, {...this.filters, ...this.options})
+        .then((response) => {
+          this.processes = response.data;
+          this.totalRecords = response.meta.total;
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
+    },
+    rowClick(row) {
+      this.proccess = row;
+      this.project = row.project; 
+      this.$refs.execute.show()
+      console.log(this.proccess, this.project)
+    },
+    fetchLog: function(item, itemsPerPage){
+      this.loading = true
+      if(itemsPerPage) this.options2.itemsPerPage = itemsPerPage
+      apiService
+        .get("process-logs/", {process_id: item.id, ...this.options2})
+        .then((response) => {
+          this.log = response.data
+          this.totalRecords2 = response.total;
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {
+         this.loading = false;
+        });
+    },
+    
+    fetchProcessStatus: function(){
+      this.loading = true
+      apiService
+        .get("status/", {perPage: -1})
+        .then((response) => {
+          this.processStatus = response.data
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {
+         this.loading = false;
+        });
+    },
+    fetchProjects: function () {
+      this.loading = true;
+      apiService
+        .get("projects/"+this.$store.state.user.customer_id, {itemsPerPage: -1, status: 1})
+        .then((response) => {
+          this.projects = response.data;
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
+    },
+    fetchCustomer: function () {
+      return apiService
+        .get("customer/list")
+        .then((response) => {
+          this.customers = response.data;
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {});
+    },
+    fetchUser: function () {
+      return apiService
+        .get("user/list")
+        .then((response) => {
+          this.users = response.data;
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {});
+    },
+    openLog: function(item){
+      this.logModal = true
+      this.proccess = item
+      this.fetchLog(item, 10)
+    },
+    deleteProcess: function(item) {
+      this.loading = true;
+      let id = item.id 
+      return apiService
+        .delete("processes/" + id)
+        .then((response) => {
+          this.$snotify.success("Processo excluído com sucesso");
+        })
+        .catch((error) => {
+          this.$snotify.error(error);
+        })
+        .finally(() => {
+          this.loading = false;
+          this.dialog.value = false;
+        });
+    },
+  },
+  
+  computed: {
+      ProcessesList: function () {
+        return this.processes.map( (u) => {
+          // u.project = this.projects[u.project_id-1];
+          u.start_at = this.toBrDateTime(u.created_at);
+          return u
+        });
+      }
+  },
+  mounted: async function () {
+      this.loading = true;
+      this.intervalProcess = setInterval(this.fetchProcesses, 10000);
+      await this.fetchProcessStatus();
+      await this.fetchProjects();
+      await this.fetchUser();
+      if(this.$store.state.user.customer_id == 1){
+        this.fetchCustomer();
+      }
+/*       this.processes.forEach(process => {
+        if(process.id == 18) {
+            process.status_id = 1
+        }
+      }); */
+  },
+  beforeDestroy() {
+    clearInterval(this.intervalProcess);
+  }
+};
+</script>
